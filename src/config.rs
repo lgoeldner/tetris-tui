@@ -18,7 +18,7 @@ impl Config {
     pub fn get() -> Result<Self, io::Error> {
         let project_dir = ProjectDirs::from("", "", "tetris tui").ok_or(io::Error::new(
             io::ErrorKind::Other,
-            "Config file location not found!",
+            "Config file location could not be generated!",
         ))?;
 
         let conf_location = get_config_location(&project_dir);
