@@ -1,3 +1,4 @@
+use config::{Config, MatchesAnyKey};
 use core::fmt;
 use rand::Rng;
 use std::error::Error;
@@ -5,6 +6,7 @@ use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::result;
 use std::sync::mpsc::{channel, Receiver, Sender};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -26,7 +28,9 @@ use sqlite::HighScoreRepo;
 mod multiplayer;
 pub mod sqlite;
 
-mod config;
+pub mod config;
+
+pub static CONFIG: OnceLock<Config> = OnceLock::new();
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -898,6 +902,7 @@ impl Game {
         let mut soft_drop_timer = Instant::now();
 
         let mut reset_needed = false;
+        let global_config = CONFIG.get().unwrap();
         loop {
             if self.paused {
                 self.handle_pause_event(stdout)?;
@@ -938,50 +943,88 @@ impl Game {
                             }) => {
                                 if kind == KeyEventKind::Press {
                                     let mut tetromino = self.current_tetromino.clone();
-                                    match code {
-                                        KeyCode::Char('h') | KeyCode::Left => {
-                                            tetromino.move_left(self, stdout)?;
-                                            self.current_tetromino = tetromino;
-                                        }
-                                        KeyCode::Char('l') | KeyCode::Right => {
-                                            tetromino.move_right(self, stdout)?;
-                                            self.current_tetromino = tetromino;
-                                        }
-                                        KeyCode::Char(' ') => {
-                                            tetromino.rotate(self, stdout)?;
-                                            self.current_tetromino = tetromino;
-                                        }
-                                        KeyCode::Char('s') | KeyCode::Up => {
-                                            if soft_drop_timer.elapsed()
-                                                >= (Duration::from_millis(self.drop_interval / 8))
-                                            {
-                                                let mut tetromino = self.current_tetromino.clone();
-                                                if self.can_move(
-                                                    &tetromino,
-                                                    tetromino.position.row as i16 + 1,
-                                                    tetromino.position.col as i16,
-                                                ) {
-                                                    tetromino.move_down(self, stdout)?;
-                                                    self.current_tetromino = tetromino;
-                                                } else {
-                                                    self.lock_and_move_to_next(&tetromino, stdout)?;
-                                                }
-
-                                                soft_drop_timer = Instant::now();
+                                    // directions
+                                    // left
+                                    if code.matches(&global_config.left) {
+                                        tetromino.move_left(self, stdout)?;
+                                        self.current_tetromino = tetromino;
+                                    // right
+                                    } else if code.matches(&global_config.right) {
+                                        tetromino.move_right(self, stdout)?;
+                                        self.current_tetromino = tetromino;
+                                    } else if code.matches(&global_config.rotate) {
+                                        tetromino.rotate(self, stdout)?;
+                                        self.current_tetromino = tetromino;
+                                    } else if code.matches(&global_config.soft_drop) {
+                                        if soft_drop_timer.elapsed()
+                                            >= (Duration::from_millis(self.drop_interval / 8))
+                                        {
+                                            let mut tetromino = self.current_tetromino.clone();
+                                            if self.can_move(
+                                                &tetromino,
+                                                tetromino.position.row as i16 + 1,
+                                                tetromino.position.col as i16,
+                                            ) {
+                                                tetromino.move_down(self, stdout)?;
+                                                self.current_tetromino = tetromino;
+                                            } else {
+                                                self.lock_and_move_to_next(&tetromino, stdout)?;
                                             }
+
+                                            soft_drop_timer = Instant::now();
                                         }
-                                        KeyCode::Char('j') | KeyCode::Down => {
-                                            tetromino.hard_drop(self, stdout)?;
-                                            self.lock_and_move_to_next(&tetromino, stdout)?;
-                                        }
-                                        KeyCode::Char('p') => {
-                                            self.paused = !self.paused;
-                                        }
-                                        KeyCode::Char('q') => {
-                                            self.handle_quit_event(stdout)?;
-                                        }
-                                        _ => {}
+                                    } else if code.matches(&global_config.hard_drop) {
+                                        tetromino.hard_drop(self, stdout)?;
+                                        self.lock_and_move_to_next(&tetromino, stdout)?;
+                                    } else if code == global_config.pause {
+                                        self.paused = !self.paused;
+                                    } else if code == global_config.quit {
+                                        self.handle_quit_event(stdout)?;
                                     }
+                                    // match code {
+                                    //     KeyCode::Char('h') | KeyCode::Left => {
+                                    //         tetromino.move_left(self, stdout)?;
+                                    //         self.current_tetromino = tetromino;
+                                    //     }
+                                    //     KeyCode::Char('l') | KeyCode::Right => {
+                                    //         tetromino.move_right(self, stdout)?;
+                                    //         self.current_tetromino = tetromino;
+                                    //     }
+                                    //     KeyCode::Char(' ') => {
+                                    //         tetromino.rotate(self, stdout)?;
+                                    //         self.current_tetromino = tetromino;
+                                    //     }
+                                    //     KeyCode::Char('s') | KeyCode::Up => {
+                                    //         if soft_drop_timer.elapsed()
+                                    //             >= (Duration::from_millis(self.drop_interval / 8))
+                                    //         {
+                                    //             let mut tetromino = self.current_tetromino.clone();
+                                    //             if self.can_move(
+                                    //                 &tetromino,
+                                    //                 tetromino.position.row as i16 + 1,
+                                    //                 tetromino.position.col as i16,
+                                    //             ) {
+                                    //                 tetromino.move_down(self, stdout)?;
+                                    //                 self.current_tetromino = tetromino;
+                                    //             } else {
+                                    //                 self.lock_and_move_to_next(&tetromino, stdout)?;
+                                    //             }
+
+                                    //             soft_drop_timer = Instant::now();
+                                    //         }
+                                    //     }
+                                    //     KeyCode::Char('j') | KeyCode::Down => {
+                                    //         tetromino.hard_drop(self, stdout)?;
+                                    //         self.lock_and_move_to_next(&tetromino, stdout)?;
+                                    //     }
+                                    //     KeyCode::Char('p') => {
+                                    //         self.paused = !self.paused;
+                                    //     }
+                                    //     KeyCode::Char('q') => {
+                                    //         self.handle_quit_event(stdout)?;
+                                    //     }
+                                    //     _ => {}
+                                    // }
                                 }
                             }
                             _ => {}

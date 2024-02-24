@@ -4,7 +4,10 @@ use crossterm::terminal;
 
 use clap::Parser;
 
-use tetris_tui::{Args, PLAY_WIDTH, PLAY_HEIGHT, CELL_WIDTH, STATS_WIDTH, DISTANCE, MAX_LEVEL, Result};
+use tetris_tui::{
+    config::Config, Args, Result, CELL_WIDTH, CONFIG, DISTANCE, MAX_LEVEL, PLAY_HEIGHT, PLAY_WIDTH,
+    STATS_WIDTH,
+};
 
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -29,6 +32,10 @@ fn main() -> Result<()> {
         );
         exit(1);
     }
+
+    CONFIG
+        .set(Config::get().expect("Could not initialize Config!"))
+        .expect("Failed to set Config file");
 
     tetris_tui::start(&args, term_width, term_height)?;
 

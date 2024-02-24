@@ -128,3 +128,14 @@ pub struct KeyWithAlt {
     #[serde(default = "keycode_null", with = "KeyCodeDef")]
     pub alt: KeyCode,
 }
+
+pub trait MatchesAnyKey {
+	fn matches(&self, code: &KeyWithAlt) -> bool;
+}
+
+impl MatchesAnyKey for KeyCode {
+	/// checks if the code (self) is in the KeyWithAlt arg provided
+	fn matches(&self, to_match: &KeyWithAlt) -> bool {
+		self == &to_match.key || self == &to_match.alt
+	}
+}
