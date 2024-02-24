@@ -26,6 +26,8 @@ use sqlite::HighScoreRepo;
 mod multiplayer;
 pub mod sqlite;
 
+mod config;
+
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
 pub struct Args {
