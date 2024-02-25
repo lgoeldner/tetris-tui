@@ -4,7 +4,10 @@ use crossterm::terminal;
 
 use clap::Parser;
 
-use tetris_tui::{Args, PLAY_WIDTH, PLAY_HEIGHT, CELL_WIDTH, STATS_WIDTH, DISTANCE, MAX_LEVEL, Result};
+use tetris_tui::{
+    config::Config, Args, Result, CELL_WIDTH, CONFIG, DISTANCE, HELP_MESSAGE, MAX_LEVEL,
+    PLAY_HEIGHT, PLAY_WIDTH, STATS_WIDTH,
+};
 
 fn main() -> Result<()> {
     let args = Args::parse();
@@ -29,6 +32,24 @@ fn main() -> Result<()> {
         );
         exit(1);
     }
+
+    CONFIG
+        .set(Config::get())
+        .expect("Failed to set global Config static");
+
+    // create the help message and leak it
+    // by converting every String into a Box<'static str> and leaking it
+    let help_message: Vec<&'static str> = CONFIG
+        .get()
+        .unwrap()
+        .create_help_message()
+        .iter()
+        .map(|s| Box::leak(s.clone().into_boxed_str()) as &str)
+        .collect();
+
+    HELP_MESSAGE
+        .set(help_message)
+        .expect("Could not set Help Message");
 
     tetris_tui::start(&args, term_width, term_height)?;
 

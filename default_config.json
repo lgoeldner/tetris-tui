@@ -1,0 +1,42 @@
+{
+	"left": {
+		"key": {
+			"char_key": "h"
+		},
+		"alt": "Left"
+	},
+	"right": {
+		"key": {
+			"char_key": "l"
+		},
+		"alt": "Right"
+	},
+	"rotate": {
+		"key": {
+			"char_key": " "
+		}
+	},
+	"soft_drop": {
+		"key": {
+			"char_key": "s"
+		},
+		"alt": "Up"
+	},
+	"hard_drop": {
+		"key": {
+			"char_key": "j"
+		},
+		"alt": "Down"
+	},
+	"pause": {
+		"char_key": "p"
+	},
+	"quit": "Esc",
+	"continue": {
+		"char_key": "c"
+	},
+	"restart": {
+		"char_key": "r"
+	}
+
+}
