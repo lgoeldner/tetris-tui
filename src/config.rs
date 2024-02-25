@@ -1,9 +1,9 @@
 use crossterm::event::KeyCode;
 use directories_next::ProjectDirs;
 // use dirs::config_dir;
-use crate::CELL_WIDTH;
+
 use serde::Deserialize;
-use std::{fs, io, path::PathBuf};
+use std::{fs, io};
 
 static DEFAULT_CONFIG: &str = include_str!(r"../default_config.json");
 

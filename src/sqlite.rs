@@ -10,10 +10,10 @@ pub fn open() -> RusqliteResult<Connection, Box<dyn Error>> {
 
     let db_dir = base_dir.data_dir();
 
-    fs::create_dir_all(&db_dir)?;
+    fs::create_dir_all(db_dir)?;
 
     let db_path = db_dir.join("tetris_high_scores.db");
-    Connection::open(&db_path).map_err(|err| err.into())
+    Connection::open(db_path).map_err(|err| err.into())
 }
 
 pub struct HighScoreRepo {

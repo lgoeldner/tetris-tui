@@ -5,7 +5,7 @@ use std::error::Error;
 use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::{Once, OnceLock};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant};
 use std::{result, vec};
@@ -54,12 +54,12 @@ pub struct Cell {
     color: Color,
 }
 
-const SPACE: &str = "   ";
+const EMPTY_SPACE: &str = "   ";
 const SQUARE_BRACKETS: &str = "[#]";
 pub const CELL_WIDTH: usize = 3;
 
 pub const EMPTY_CELL: Cell = Cell {
-    symbols: SPACE,
+    symbols: EMPTY_SPACE,
     color: Color::Reset,
 };
 
@@ -167,12 +167,12 @@ pub fn start(args: &Args, term_width: u16, term_height: u16) -> Result<()> {
     let sqlite_highscore_repo = Box::new(HighScoreRepo { conn });
 
     if args.multiplayer {
-        if args.server_address == None {
+        if args.server_address.is_none() {
             let listener = TcpListener::bind("0.0.0.0:8080")?;
             let my_local_ip = local_ip()?;
             println!(
-                "Server started. Please invite your competitor to connect to {}.",
-                format!("{}:8080", my_local_ip)
+                "Server started. Please invite your competitor to connect to {}:8080.",
+                my_local_ip
             );
 
             let (stream, _) = listener.accept()?;
@@ -337,14 +337,12 @@ pub trait TetrominoSpawner {
 }
 
 pub struct RandomTetromino {
-	bag: TgmBag
+    bag: TgmBag,
 }
 
 impl RandomTetromino {
     pub fn new() -> Self {
-        Self {
-			bag: TgmBag::new()
-		}
+        Self { bag: TgmBag::new() }
     }
 }
 
@@ -505,9 +503,9 @@ impl TetrominoSpawner for RandomTetromino {
             l_tetromino_states.clone(),
         ];
 
-        let mut rng = rand::thread_rng();
+        let _rng = rand::thread_rng();
         // let random_tetromino_index = rng.gen_range(0..tetromino_states.len());
-		let random_tetromino_index = self.bag.draw() as usize;
+        let random_tetromino_index = self.bag.draw() as usize;
 
         let states = tetromino_states[random_tetromino_index].clone();
         let tetromino_with = tetromino_width(&states[0]);
@@ -564,7 +562,7 @@ impl TgmBag {
         let chosen_index = (0..self.bag.len()).choose(&mut rng).unwrap();
         let chosen_tetronimo = self.bag.swap_remove(chosen_index);
         // insert the least represented tetromino into the bag
-        let least_used = least_used(&self);
+        let least_used = least_used(self);
         self.bag.push(least_used);
         // update frequencies
         self.frequencies[least_used as usize] += 1;
@@ -609,7 +607,7 @@ impl Game {
         receiver: Option<Receiver<MessageType>>,
         state_sender: Option<Sender<Vec<Vec<Cell>>>>,
     ) -> Result<Self> {
-        let global_config = CONFIG
+        let _global_config = CONFIG
             .get()
             .expect("Global Config needs to be initialized by now");
 
@@ -691,7 +689,7 @@ impl Game {
 
         // Clear any existing messages in the receiver
         if let Some(ref mut receiver) = self.receiver {
-            while let Ok(_) = receiver.try_recv() {}
+            while receiver.try_recv().is_ok() {}
         }
 
         // Resume the game
@@ -736,14 +734,14 @@ impl Game {
         self.print_left_aligned_messages(
             stdout,
             "Stats",
-            Some(STATS_WIDTH.into()),
+            Some(STATS_WIDTH),
             stats_start_x as u16,
             self.start_y as u16 + 1,
             &vec,
         )?;
 
         // multiplayer game score
-        if let Some(_) = &self.stream {
+        if self.stream.is_some() {
             let vec: Vec<String> = vec![
                 "".into(),
                 format!(
@@ -756,7 +754,7 @@ impl Game {
             self.print_left_aligned_messages(
                 stdout,
                 "2-Player",
-                Some(STATS_WIDTH.into()),
+                Some(STATS_WIDTH),
                 stats_start_x as u16,
                 self.start_y as u16 + 9,
                 &x,
@@ -793,9 +791,9 @@ impl Game {
             start_y as u16,
             format!(
                 "╭{} {} {}╮",
-                "─".repeat(left as usize),
+                "─".repeat(left),
                 title,
-                "─".repeat(width as usize - left as usize - title.len() - 2)
+                "─".repeat(width - left - title.len() - 2)
             )
             .as_str(),
         )?;
@@ -821,7 +819,7 @@ impl Game {
             Color::White,
             start_x as u16,
             start_y as u16 + height as u16,
-            format!("╰{}╯", ("─").repeat(width as usize)).as_str(),
+            format!("╰{}╯", ("─").repeat(width).as_str()).as_str(),
         )?;
 
         stdout.flush()?;
@@ -836,12 +834,12 @@ impl Game {
         width: Option<usize>,
         start_x: u16,
         start_y: u16,
-        messages: &Vec<T>,
+        messages: &[T],
         // message_length: usize,
     ) -> Result<()> {
         // let messages = messages.into_iter().collect::<Vec<_>>();
 
-        let (longest_key_length, longest_value_length) = find_longest_key_value_length(&messages);
+        let (longest_key_length, longest_value_length) = find_longest_key_value_length(messages);
         let frame_width: usize;
         if let Some(value) = width {
             frame_width = value;
@@ -866,7 +864,7 @@ impl Game {
 
         // Print the messages with borders
         for (index, message) in messages.iter().enumerate() {
-            if message.as_ref().len() == 0 {
+            if message.as_ref().is_empty() {
                 self.terminal.write(
                     Color::White,
                     start_x,
@@ -941,7 +939,7 @@ impl Game {
 
     pub fn render_play_grid(&self) -> Result<()> {
         for (y, row) in self.play_grid.iter().enumerate() {
-            for (x, &ref cell) in row.iter().enumerate() {
+            for (x, cell) in row.iter().enumerate() {
                 let screen_x = self.start_x + 1 + x * CELL_WIDTH;
                 let screen_y = self.start_y + 1 + y;
                 self.terminal
@@ -990,57 +988,53 @@ impl Game {
 
             if self.terminal.poll_event(Duration::from_millis(10))? {
                 if let Ok(event) = self.terminal.read_event() {
-                    match event {
-                        Event::Key(KeyEvent {
-                            code,
-                            state: _,
-                            kind,
-                            modifiers: _,
-                        }) => {
-                            if kind == KeyEventKind::Press {
+                    if let Event::Key(KeyEvent {
+                        code,
+                        kind: KeyEventKind::Press,
+                        ..
+                    }) = event
+                    {
+                        let mut tetromino = self.current_tetromino.clone();
+                        // directions
+                        // left
+                        if code.matches(&global_config.left) {
+                            tetromino.move_left(self, stdout)?;
+                            self.current_tetromino = tetromino;
+                        // right
+                        } else if code.matches(&global_config.right) {
+                            tetromino.move_right(self, stdout)?;
+                            self.current_tetromino = tetromino;
+                        } else if code.matches(&global_config.rotate) {
+                            tetromino.rotate(self, stdout)?;
+                            self.current_tetromino = tetromino;
+                        } else if code.matches(&global_config.soft_drop) {
+                            if soft_drop_timer.elapsed()
+                                >= (Duration::from_millis(self.drop_interval / 8))
+                            {
                                 let mut tetromino = self.current_tetromino.clone();
-                                // directions
-                                // left
-                                if code.matches(&global_config.left) {
-                                    tetromino.move_left(self, stdout)?;
+                                if self.can_move(
+                                    &tetromino,
+                                    tetromino.position.row as i16 + 1,
+                                    tetromino.position.col as i16,
+                                ) {
+                                    tetromino.move_down(self, stdout)?;
                                     self.current_tetromino = tetromino;
-                                // right
-                                } else if code.matches(&global_config.right) {
-                                    tetromino.move_right(self, stdout)?;
-                                    self.current_tetromino = tetromino;
-                                } else if code.matches(&global_config.rotate) {
-                                    tetromino.rotate(self, stdout)?;
-                                    self.current_tetromino = tetromino;
-                                } else if code.matches(&global_config.soft_drop) {
-                                    if soft_drop_timer.elapsed()
-                                        >= (Duration::from_millis(self.drop_interval / 8))
-                                    {
-                                        let mut tetromino = self.current_tetromino.clone();
-                                        if self.can_move(
-                                            &tetromino,
-                                            tetromino.position.row as i16 + 1,
-                                            tetromino.position.col as i16,
-                                        ) {
-                                            tetromino.move_down(self, stdout)?;
-                                            self.current_tetromino = tetromino;
-                                        } else {
-                                            self.lock_and_move_to_next(&tetromino, stdout)?;
-                                        }
-
-                                        soft_drop_timer = Instant::now();
-                                    }
-                                } else if code.matches(&global_config.hard_drop) {
-                                    tetromino.hard_drop(self, stdout)?;
+                                } else {
                                     self.lock_and_move_to_next(&tetromino, stdout)?;
-                                } else if code == global_config.pause {
-                                    self.paused = !self.paused;
-                                } else if code == global_config.quit {
-                                    self.handle_quit_event(stdout)?;
                                 }
+
+                                soft_drop_timer = Instant::now();
                             }
+                        } else if code.matches(&global_config.hard_drop) {
+                            tetromino.hard_drop(self, stdout)?;
+                            self.lock_and_move_to_next(&tetromino, stdout)?;
+                        } else if code == global_config.pause {
+                            self.paused = !self.paused;
+                        } else if code == global_config.quit {
+                            self.handle_quit_event(stdout)?;
                         }
-                        _ => {}
                     }
+
                     self.render_current_tetromino()?;
                 }
             }
@@ -1084,7 +1078,7 @@ impl Game {
                             self.multiplayer_score.my_score += 1;
 
                             let stats_start_x = self.start_x - STATS_WIDTH - DISTANCE - 1;
-                            if let Some(_) = &self.stream {
+                            if self.stream.is_some() {
                                 execute!(
                                     stdout,
                                     SetForegroundColor(Color::White),
@@ -1156,25 +1150,20 @@ impl Game {
         loop {
             if self.terminal.poll_event(Duration::from_millis(10))? {
                 let event = self.terminal.read_event()?;
-                match event {
-                    Event::Key(KeyEvent {
-                        code,
-                        modifiers: _,
-                        kind,
-                        state: _,
-                    }) => {
-                        if kind == KeyEventKind::Press {
-                            if code.matches(&KeyWithAlt::new(global_config.pause, KeyCode::Enter)) {
-                                self.render_changed_portions()?;
-                                self.paused = false;
-                                break;
-                            }
-                            if code == global_config.quit {
-                                self.quit()?;
-                            }
-                        }
+                if let Event::Key(KeyEvent {
+                    code,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) = event
+                {
+                    if code.matches(&KeyWithAlt::new(global_config.pause, KeyCode::Enter)) {
+                        self.render_changed_portions()?;
+                        self.paused = false;
+                        break;
                     }
-                    _ => {}
+                    if code == global_config.quit {
+                        self.quit()?;
+                    }
                 }
             }
         }
@@ -1197,28 +1186,19 @@ impl Game {
         loop {
             if self.terminal.poll_event(Duration::from_millis(10))? {
                 let event = self.terminal.read_event()?;
-                match event {
-                    Event::Key(KeyEvent {
-                        code,
-                        modifiers: _,
-                        kind,
-                        state: _,
-                    }) => {
-                        if kind == KeyEventKind::Press {
-                            match code {
-                                KeyCode::Enter | KeyCode::Char('y') => {
-                                    self.quit()?;
-                                }
-                                KeyCode::Esc | KeyCode::Char('n') => {
-                                    self.render_changed_portions()?;
-                                    self.paused = false;
-                                    break;
-                                }
-                                _ => {}
-                            }
-                        }
+                if let Event::Key(KeyEvent {
+                    code,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) = event
+                {
+                    if code == global_config.continue_key {
+                        self.quit()?;
+                    } else if code == global_config.quit || code == KeyCode::Esc {
+                        self.render_changed_portions()?;
+                        self.paused = false;
+                        break;
                     }
-                    _ => {}
                 }
             }
         }
@@ -1251,11 +1231,11 @@ impl Game {
     pub fn clear_tetromino(&mut self, stdout: &mut std::io::Stdout) -> Result<()> {
         let tetromino = &self.current_tetromino;
         for (row_index, row) in tetromino.states[tetromino.current_state].iter().enumerate() {
-            for (col_index, &ref cell) in row.iter().enumerate() {
+            for (col_index, cell) in row.iter().enumerate() {
                 let grid_x = tetromino.position.col + col_index as isize;
                 let grid_y = tetromino.position.row + row_index as isize;
 
-                if cell.symbols != SPACE {
+                if cell.symbols != EMPTY_SPACE {
                     execute!(
                         stdout,
                         SetBackgroundColor(Color::Black),
@@ -1264,7 +1244,7 @@ impl Game {
                             self.start_x as u16 + 1 + grid_x as u16 * CELL_WIDTH as u16,
                             self.start_y as u16 + 1 + grid_y as u16,
                         ),
-                        Print(SPACE),
+                        Print(EMPTY_SPACE),
                         ResetColor,
                         RestorePosition
                     )?;
@@ -1299,7 +1279,7 @@ impl Game {
 
     fn lock_tetromino(&mut self, tetromino: &Tetromino) -> Result<()> {
         for (ty, row) in tetromino.get_cells().iter().enumerate() {
-            for (tx, &ref cell) in row.iter().enumerate() {
+            for (tx, cell) in row.iter().enumerate() {
                 if cell.symbols == SQUARE_BRACKETS {
                     let grid_x = (tetromino.position.col as usize).wrapping_add(tx);
                     let grid_y = (tetromino.position.row as usize).wrapping_add(ty);
@@ -1384,19 +1364,20 @@ impl Game {
             .iter()
             .enumerate()
         {
-            for (col_index, &ref cell) in row.iter().enumerate() {
+            for (col_index, cell) in row.iter().enumerate() {
                 let grid_x = current_tetromino.position.col + col_index as isize;
                 let grid_y = current_tetromino.position.row + row_index as isize;
 
-                if cell.symbols != SPACE {
-                    if grid_x < PLAY_WIDTH as isize && grid_y < PLAY_HEIGHT as isize {
-                        self.terminal.write(
-                            cell.color,
-                            self.start_x as u16 + 1 + grid_x as u16 * CELL_WIDTH as u16,
-                            self.start_y as u16 + 1 + grid_y as u16,
-                            cell.symbols,
-                        )?;
-                    }
+                if cell.symbols != EMPTY_SPACE
+                    && grid_x < PLAY_WIDTH as isize
+                    && grid_y < PLAY_HEIGHT as isize
+                {
+                    self.terminal.write(
+                        cell.color,
+                        self.start_x as u16 + 1 + grid_x as u16 * CELL_WIDTH as u16,
+                        self.start_y as u16 + 1 + grid_y as u16,
+                        cell.symbols,
+                    )?;
                 }
             }
         }
@@ -1421,25 +1402,22 @@ impl Game {
             .iter()
             .enumerate()
         {
-            for (col_index, &ref cell) in row.iter().enumerate() {
+            for (col_index, cell) in row.iter().enumerate() {
                 let grid_x = next_tetromino.position.col as usize + col_index;
                 let grid_y = next_tetromino.position.row as usize + row_index;
 
-                if cell.symbols != SPACE {
-                    if grid_x < NEXT_WIDTH && grid_y < NEXT_HEIGHT {
-                        self.terminal.write(
-                            cell.color,
-                            next_start_x as u16
-                                + 1
-                                + grid_x as u16 * CELL_WIDTH as u16
-                                + tetromino_width(
-                                    &next_tetromino.states[next_tetromino.current_state],
-                                ) as u16
-                                    % 2,
-                            self.start_y as u16 + grid_y as u16,
-                            cell.symbols,
-                        )?;
-                    }
+                if cell.symbols != EMPTY_SPACE && grid_x < NEXT_WIDTH && grid_y < NEXT_HEIGHT {
+                    self.terminal.write(
+                        cell.color,
+                        next_start_x as u16
+                            + 1
+                            + grid_x as u16 * CELL_WIDTH as u16
+                            + tetromino_width(&next_tetromino.states[next_tetromino.current_state])
+                                as u16
+                                % 2,
+                        self.start_y as u16 + grid_y as u16,
+                        cell.symbols,
+                    )?;
                 }
             }
         }
@@ -1486,7 +1464,7 @@ impl Game {
             self.multiplayer_score.competitor_score += 1;
 
             let stats_start_x = self.start_x - STATS_WIDTH - DISTANCE - 1;
-            if let Some(_) = &self.stream {
+            if self.stream.is_some() {
                 self.terminal.write(
                     Color::White,
                     stats_start_x as u16 + 2 + "Score: ".len() as u16,
@@ -1544,10 +1522,10 @@ impl Game {
             }
         }
 
-        if players_str.len() > 0 {
+        if !players_str.is_empty() {
             self.print_centered_messages(
                 stdout,
-                Some((PLAY_WIDTH + 2) * CELL_WIDTH).into(),
+                Some((PLAY_WIDTH + 2) * CELL_WIDTH),
                 vec!["GAME OVER"]
                     .into_iter()
                     .chain(vec![""; players_str.len() + 3])
@@ -1839,7 +1817,7 @@ pub fn tetromino_width(tetromino: &[Vec<Cell>]) -> usize {
     for col in 0..tetromino[0].len() {
         let col_width = tetromino
             .iter()
-            .filter(|row| row[col].symbols != SPACE)
+            .filter(|row| row[col].symbols != EMPTY_SPACE)
             .count();
 
         if col_width > 0 {
