@@ -155,6 +155,7 @@ pub struct Player {
 const ENTER_YOUR_NAME_MESSAGE: &str = "Enter your name: ";
 const MAX_NAME_LENGTH: usize = 12;
 const DEFAULT_INTERVAL: u64 = 500;
+const BACKGROUND_COLOR: Color = Color::AnsiValue(234);
 
 pub fn start(args: &Args, term_width: u16, term_height: u16) -> Result<()> {
     let start_x = (term_width as usize - PLAY_WIDTH * CELL_WIDTH - 2) / 2;
@@ -162,7 +163,6 @@ pub fn start(args: &Args, term_width: u16, term_height: u16) -> Result<()> {
 
     let terminal = Box::new(RealTerminal);
     let tetromino_spawner = Box::new(RandomTetromino::new());
-
     let conn = sqlite::open()?;
     let sqlite_highscore_repo = Box::new(HighScoreRepo { conn });
 
@@ -302,7 +302,7 @@ impl Terminal for RealTerminal {
             io::stdout(),
             SavePosition,
             SetForegroundColor(foreground_color),
-            SetBackgroundColor(Color::Black),
+            SetBackgroundColor(BACKGROUND_COLOR),
             MoveTo(col, row),
             Print(msg),
             ResetColor,
@@ -1082,7 +1082,7 @@ impl Game {
                                 execute!(
                                     stdout,
                                     SetForegroundColor(Color::White),
-                                    SetBackgroundColor(Color::Black),
+                                    SetBackgroundColor(BACKGROUND_COLOR),
                                     SavePosition,
                                     MoveTo(
                                         stats_start_x as u16 + 2 + "Score: ".len() as u16,
@@ -1238,7 +1238,7 @@ impl Game {
                 if cell.symbols != EMPTY_SPACE {
                     execute!(
                         stdout,
-                        SetBackgroundColor(Color::Black),
+                        SetBackgroundColor(BACKGROUND_COLOR),
                         SavePosition,
                         MoveTo(
                             self.start_x as u16 + 1 + grid_x as u16 * CELL_WIDTH as u16,

@@ -26,3 +26,7 @@ serde_json = "1.0.114"
 
 [profile.release]
 strip = "debuginfo"
+
+[[bin]]
+name = "tetris"
+path = "src/main.rs"
