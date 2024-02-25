@@ -35,111 +35,6 @@ pub mod config;
 pub static CONFIG: OnceLock<Config> = OnceLock::new();
 pub static HELP_MESSAGE: OnceLock<Vec<&str>> = OnceLock::new();
 
-#[derive(Parser, Debug)]
-#[command(author, version, about, long_about = None)]
-pub struct Args {
-    #[arg(short, long, default_value_t = false)]
-    multiplayer: bool,
-
-    #[arg(short, long)]
-    server_address: Option<String>,
-
-    /// The number of lines already filled
-    #[arg(short, long, default_value_t = 0, verbatim_doc_comment)]
-    pub number_of_lines_already_filled: usize,
-
-    /// Start at level
-    #[arg(short, long, default_value_t = 0, verbatim_doc_comment)]
-    pub level: usize,
-}
-
-pub fn start(args: &Args, term_width: u16, term_height: u16) -> Result<()> {
-    let start_x = (term_width as usize - PLAY_WIDTH * CELL_WIDTH - 2) / 2;
-    let start_y = (term_height as usize - PLAY_HEIGHT - 2) / 2;
-
-    let terminal = Box::new(RealTerminal);
-    let tetromino_spawner = Box::new(RandomTetromino);
-
-    let conn = sqlite::open()?;
-    let sqlite_highscore_repo = Box::new(HighScoreRepo { conn });
-
-    if args.multiplayer {
-        if args.server_address == None {
-            let listener = TcpListener::bind("0.0.0.0:8080")?;
-            let my_local_ip = local_ip()?;
-            println!(
-                "Server started. Please invite your competitor to connect to {}.",
-                format!("{}:8080", my_local_ip)
-            );
-
-            let (stream, _) = listener.accept()?;
-            println!("Player 2 connected.");
-
-            let mut stream_clone = stream.try_clone()?;
-            let (sender, receiver): (Sender<MessageType>, Receiver<MessageType>) = channel();
-            let mut game = Game::new(
-                terminal,
-                tetromino_spawner,
-                sqlite_highscore_repo,
-                start_x,
-                start_y,
-                args.number_of_lines_already_filled,
-                args.level,
-                Some(stream),
-                Some(receiver),
-                None,
-            )?;
-
-            thread::spawn(move || {
-                multiplayer::forward_to_main_thread(&mut stream_clone, sender);
-            });
-
-            game.start()?;
-        } else {
-            if let Some(server_address) = &args.server_address {
-                let stream = TcpStream::connect(server_address)?;
-
-                let mut stream_clone = stream.try_clone()?;
-                let (sender, receiver): (Sender<MessageType>, Receiver<MessageType>) = channel();
-                let mut game = Game::new(
-                    terminal,
-                    tetromino_spawner,
-                    sqlite_highscore_repo,
-                    start_x,
-                    start_y,
-                    args.number_of_lines_already_filled,
-                    args.level,
-                    Some(stream),
-                    Some(receiver),
-                    None,
-                )?;
-
-                thread::spawn(move || {
-                    multiplayer::forward_to_main_thread(&mut stream_clone, sender);
-                });
-
-                game.start()?;
-            }
-        }
-    } else {
-        let mut game = Game::new(
-            terminal,
-            tetromino_spawner,
-            sqlite_highscore_repo,
-            start_x,
-            start_y,
-            args.number_of_lines_already_filled,
-            args.level,
-            None,
-            None,
-            None,
-        )?;
-        game.start()?;
-    }
-
-    Ok(())
-}
-
 pub const PLAY_WIDTH: usize = 10;
 pub const PLAY_HEIGHT: usize = 20;
 
@@ -160,7 +55,7 @@ pub struct Cell {
 }
 
 const SPACE: &str = "   ";
-const SQUARE_BRACKETS: &str = "[ ]";
+const SQUARE_BRACKETS: &str = "[#]";
 pub const CELL_WIDTH: usize = 3;
 
 pub const EMPTY_CELL: Cell = Cell {
@@ -211,6 +106,24 @@ pub const L_CELL: Cell = Cell {
     },
 };
 
+#[derive(Parser, Debug)]
+#[command(author, version, about, long_about = None)]
+pub struct Args {
+    #[arg(short, long, default_value_t = false)]
+    multiplayer: bool,
+
+    #[arg(short, long)]
+    server_address: Option<String>,
+
+    /// The number of lines already filled
+    #[arg(short, long, default_value_t = 0, verbatim_doc_comment)]
+    pub number_of_lines_already_filled: usize,
+
+    /// Start at level
+    #[arg(short, long, default_value_t = 0, verbatim_doc_comment)]
+    pub level: usize,
+}
+
 #[derive(Clone)]
 pub struct Position {
     // Empty row/column can go outside of the playing field
@@ -242,6 +155,89 @@ pub struct Player {
 const ENTER_YOUR_NAME_MESSAGE: &str = "Enter your name: ";
 const MAX_NAME_LENGTH: usize = 12;
 const DEFAULT_INTERVAL: u64 = 500;
+
+pub fn start(args: &Args, term_width: u16, term_height: u16) -> Result<()> {
+    let start_x = (term_width as usize - PLAY_WIDTH * CELL_WIDTH - 2) / 2;
+    let start_y = (term_height as usize - PLAY_HEIGHT - 2) / 2;
+
+    let terminal = Box::new(RealTerminal);
+    let tetromino_spawner = Box::new(RandomTetromino);
+
+    let conn = sqlite::open()?;
+    let sqlite_highscore_repo = Box::new(HighScoreRepo { conn });
+
+    if args.multiplayer {
+        if args.server_address == None {
+            let listener = TcpListener::bind("0.0.0.0:8080")?;
+            let my_local_ip = local_ip()?;
+            println!(
+                "Server started. Please invite your competitor to connect to {}.",
+                format!("{}:8080", my_local_ip)
+            );
+
+            let (stream, _) = listener.accept()?;
+            println!("Player 2 connected.");
+
+            let mut stream_clone = stream.try_clone()?;
+            let (sender, receiver): (Sender<MessageType>, Receiver<MessageType>) = channel();
+            let mut game = Game::new(
+                terminal,
+                tetromino_spawner,
+                sqlite_highscore_repo,
+                start_x,
+                start_y,
+                args.number_of_lines_already_filled,
+                args.level,
+                Some(stream),
+                Some(receiver),
+                None,
+            )?;
+
+            thread::spawn(move || {
+                multiplayer::forward_to_main_thread(&mut stream_clone, sender);
+            });
+
+            return game.start();
+        }
+        if let Some(server_address) = &args.server_address {
+            let stream = TcpStream::connect(server_address)?;
+
+            let mut stream_clone = stream.try_clone()?;
+            let (sender, receiver): (Sender<MessageType>, Receiver<MessageType>) = channel();
+            let mut game = Game::new(
+                terminal,
+                tetromino_spawner,
+                sqlite_highscore_repo,
+                start_x,
+                start_y,
+                args.number_of_lines_already_filled,
+                args.level,
+                Some(stream),
+                Some(receiver),
+                None,
+            )?;
+
+            thread::spawn(move || {
+                multiplayer::forward_to_main_thread(&mut stream_clone, sender);
+            });
+
+            return game.start();
+        }
+    }
+    let mut game = Game::new(
+        terminal,
+        tetromino_spawner,
+        sqlite_highscore_repo,
+        start_x,
+        start_y,
+        args.number_of_lines_already_filled,
+        args.level,
+        None,
+        None,
+        None,
+    )?;
+    game.start()
+}
 
 #[derive(Debug)]
 struct GameError {
@@ -342,8 +338,16 @@ pub trait TetrominoSpawner {
 
 pub struct RandomTetromino;
 
+impl RandomTetromino {
+    pub fn new() -> Self {
+        Self
+    }
+}
+
 impl TetrominoSpawner for RandomTetromino {
     fn spawn(&self, is_next: bool) -> Tetromino {
+        
+
         let i_tetromino_states: Vec<Vec<Vec<Cell>>> = vec![
             vec![
                 vec![EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, EMPTY_CELL],
@@ -501,6 +505,8 @@ impl TetrominoSpawner for RandomTetromino {
 
         let mut rng = rand::thread_rng();
         let random_tetromino_index = rng.gen_range(0..tetromino_states.len());
+
+        let iter = (0..tetromino_states.len());
 
         let states = tetromino_states[random_tetromino_index].clone();
         let tetromino_with = tetromino_width(&states[0]);
@@ -689,6 +695,7 @@ impl Game {
             &vec,
         )?;
 
+        // multiplayer game score
         if let Some(_) = &self.stream {
             let vec: Vec<String> = vec![
                 "".into(),
@@ -708,6 +715,7 @@ impl Game {
                 &x,
             )?;
         }
+        // help message
         let vec = HELP_MESSAGE.get().unwrap();
         self.print_left_aligned_messages(
             stdout,
@@ -1052,32 +1060,24 @@ impl Game {
                             loop {
                                 if poll(Duration::from_millis(10))? {
                                     let event = read()?;
-                                    match event {
-                                        Event::Key(KeyEvent {
-                                            code,
-                                            modifiers: _,
-                                            kind,
-                                            state: _,
-                                        }) => {
-                                            if kind == KeyEventKind::Press {
-                                                match code {
-                                                    KeyCode::Enter | KeyCode::Char('c') => {
-                                                        self.render_changed_portions()?;
-                                                        self.paused = false;
-                                                        break;
-                                                    }
-                                                    KeyCode::Char('r') => {
-                                                        reset_needed = true;
-                                                        break;
-                                                    }
-                                                    KeyCode::Char('q') => {
-                                                        self.quit()?;
-                                                    }
-                                                    _ => {}
-                                                }
-                                            }
+                                    if let Event::Key(KeyEvent {
+                                        code,
+                                        kind: KeyEventKind::Press,
+                                        ..
+                                    }) = event
+                                    {
+                                        if code == global_config.continue_key {
+                                            self.render_changed_portions()?;
+                                            self.paused = false;
+                                            break;
                                         }
-                                        _ => {}
+                                        if code == global_config.restart {
+                                            reset_needed = true;
+                                            break;
+                                        }
+                                        if code == global_config.quit {
+                                            self.quit()?;
+                                        }
                                     }
                                 }
                             }
@@ -1266,7 +1266,7 @@ impl Game {
 
         Ok(())
     }
-
+    // new tetromino
     fn move_to_next(&mut self) -> Result<()> {
         self.current_tetromino = self.next_tetromino.clone();
         self.current_tetromino.position.row = 0;
