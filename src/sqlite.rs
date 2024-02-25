@@ -1,28 +1,19 @@
 use crate::{HighScore, Player, Result};
+use directories_next::ProjectDirs;
 use rusqlite::{params, Connection, Result as RusqliteResult};
 use std::error::Error;
 use std::fs;
 
 pub fn open() -> RusqliteResult<Connection, Box<dyn Error>> {
-    let home_dir = match dirs::home_dir() {
-        Some(path) => path,
-        None => {
-            return Err(Box::new(std::io::Error::new(
-                std::io::ErrorKind::Other,
-                "Failed to get the user's home directory.",
-            )));
-        }
-    };
+    let base_dir =
+        ProjectDirs::from("", "", "Tetris Tui").expect("No Base Project Directory available");
 
-    let db_dir = home_dir.join(".tetris");
-    if let Err(err) = fs::create_dir_all(db_dir.clone()) {
-        return Err(Box::new(err));
-    }
+    let db_dir = base_dir.data_dir();
 
-    let db_path = db_dir.join("high_scores.db");
-    let conn = Connection::open(&db_path)?;
+    fs::create_dir_all(&db_dir)?;
 
-    Ok(conn)
+    let db_path = db_dir.join("tetris_high_scores.db");
+    Connection::open(&db_path).map_err(|err| err.into())
 }
 
 pub struct HighScoreRepo {

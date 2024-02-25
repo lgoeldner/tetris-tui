@@ -1,4 +1,4 @@
-use config::{Config, MatchesAnyKey};
+use config::{Config, MatchesAnyKey, ToChar};
 use core::fmt;
 use rand::Rng;
 use std::error::Error;
@@ -6,7 +6,7 @@ use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
 use std::result;
 use std::sync::mpsc::{channel, Receiver, Sender};
-use std::sync::OnceLock;
+use std::sync::{Once, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -25,12 +25,15 @@ use local_ip_address::local_ip;
 use multiplayer::MessageType;
 use sqlite::HighScoreRepo;
 
+use crate::config::KeyWithAlt;
+
 mod multiplayer;
 pub mod sqlite;
 
 pub mod config;
 
 pub static CONFIG: OnceLock<Config> = OnceLock::new();
+pub static HELP_MESSAGE: OnceLock<Vec<&str>> = OnceLock::new();
 
 #[derive(Parser, Debug)]
 #[command(author, version, about, long_about = None)]
@@ -553,6 +556,10 @@ impl Game {
         receiver: Option<Receiver<MessageType>>,
         state_sender: Option<Sender<Vec<Vec<Cell>>>>,
     ) -> Result<Self> {
+        let global_config = CONFIG
+            .get()
+            .expect("Global Config needs to be initialized by now");
+
         let play_grid = create_grid(PLAY_WIDTH, PLAY_HEIGHT, start_with_number_of_filled_lines);
 
         let current_tetromino = tetromino_spawner.spawn(false);
@@ -666,57 +673,49 @@ impl Game {
         self.render_next_tetromino()?;
 
         let stats_start_x = self.start_x - DISTANCE - STATS_WIDTH - 1;
+        let vec = vec![
+            "".into(),
+            format!("Score: {}", self.score),
+            format!("Lines: {}", self.lines),
+            format!("Level: {}", self.level),
+            "".into(),
+        ];
         self.print_left_aligned_messages(
             stdout,
             "Stats",
             Some(STATS_WIDTH.into()),
             stats_start_x as u16,
             self.start_y as u16 + 1,
-            vec![
-                "",
-                format!("Score: {}", self.score).as_str(),
-                format!("Lines: {}", self.lines).as_str(),
-                format!("Level: {}", self.level).as_str(),
-                "",
-            ],
+            &vec,
         )?;
 
         if let Some(_) = &self.stream {
+            let vec: Vec<String> = vec![
+                "".into(),
+                format!(
+                    "Score: {} - {}",
+                    self.multiplayer_score.my_score, self.multiplayer_score.competitor_score,
+                ),
+                "".into(),
+            ];
+            let x = vec.iter().map(|s| s.as_str()).collect::<Vec<&str>>();
             self.print_left_aligned_messages(
                 stdout,
                 "2-Player",
                 Some(STATS_WIDTH.into()),
                 stats_start_x as u16,
                 self.start_y as u16 + 9,
-                vec![
-                    "",
-                    format!(
-                        "Score: {} - {}",
-                        self.multiplayer_score.my_score, self.multiplayer_score.competitor_score,
-                    )
-                    .as_str(),
-                    "",
-                ],
+                &x,
             )?;
         }
-
+        let vec = HELP_MESSAGE.get().unwrap();
         self.print_left_aligned_messages(
             stdout,
             "Help",
             None,
             next_start_x as u16,
             self.start_y as u16 + NEXT_HEIGHT as u16 + 7,
-            vec![
-                "",
-                "Left: h, ←",
-                "Right: l, →",
-                "Rotate: Space",
-                "Soft Drop: s, ↑",
-                "Hard Drop: j, ↓",
-                "Pause: p",
-                "Quit: q",
-                "",
-            ],
+            vec,
         )?;
 
         Ok(())
@@ -738,10 +737,10 @@ impl Game {
             start_x as u16,
             start_y as u16,
             format!(
-                "|{} {} {}|",
-                "-".repeat(left as usize),
+                "╭{} {} {}╮",
+                "─".repeat(left as usize),
                 title,
-                "-".repeat(width as usize - left as usize - title.len() - 2)
+                "─".repeat(width as usize - left as usize - title.len() - 2)
             )
             .as_str(),
         )?;
@@ -752,13 +751,13 @@ impl Game {
                 Color::White,
                 start_x as u16,
                 start_y as u16 + index as u16,
-                "|",
+                "│",
             )?;
             self.terminal.write(
                 Color::White,
                 start_x as u16 + width as u16 + 1,
                 start_y as u16 + index as u16,
-                "|",
+                "│",
             )?;
         }
 
@@ -767,7 +766,7 @@ impl Game {
             Color::White,
             start_x as u16,
             start_y as u16 + height as u16,
-            format!("|{}|", ("-").repeat(width as usize)).as_str(),
+            format!("╰{}╯", ("─").repeat(width as usize)).as_str(),
         )?;
 
         stdout.flush()?;
@@ -775,15 +774,18 @@ impl Game {
         Ok(())
     }
 
-    pub fn print_left_aligned_messages(
+    pub fn print_left_aligned_messages<T: AsRef<str>>(
         &self,
         stdout: &mut io::Stdout,
         title: &str,
         width: Option<usize>,
         start_x: u16,
         start_y: u16,
-        messages: Vec<&str>,
+        messages: &Vec<T>,
+        // message_length: usize,
     ) -> Result<()> {
+        // let messages = messages.into_iter().collect::<Vec<_>>();
+
         let (longest_key_length, longest_value_length) = find_longest_key_value_length(&messages);
         let frame_width: usize;
         if let Some(value) = width {
@@ -799,31 +801,29 @@ impl Game {
             start_x,
             start_y - 1,
             format!(
-                "{}{} {} {}{}",
-                "|",
-                ("-").repeat(left),
+                "╭{} {} {}╮",
+                ("─").repeat(left),
                 title,
-                ("-").repeat(frame_width - left - title.len() - 2),
-                "|"
+                ("─").repeat(frame_width - left - title.len() - 2),
             )
             .as_str(),
         )?;
 
         // Print the messages with borders
         for (index, message) in messages.iter().enumerate() {
-            if message.len() == 0 {
+            if message.as_ref().len() == 0 {
                 self.terminal.write(
                     Color::White,
                     start_x,
                     start_y + index as u16,
-                    format!("|{}|", " ".repeat(frame_width)).as_str(),
+                    format!("│{}│", " ".repeat(frame_width)).as_str(),
                 )?;
             } else {
-                let parts: Vec<&str> = message.split(':').collect();
+                let parts: Vec<&str> = message.as_ref().split(':').collect();
 
                 let right_padding_spaces: String;
                 if let Some(value) = width {
-                    right_padding_spaces = " ".repeat(value - 2 - message.chars().count());
+                    right_padding_spaces = " ".repeat(value - 2 - message.as_ref().chars().count());
                 } else {
                     right_padding_spaces =
                         " ".repeat(longest_value_length - parts[1].chars().count());
@@ -833,7 +833,7 @@ impl Game {
                     start_x,
                     start_y + index as u16,
                     format!(
-                        "| {:<width$}:{} {}|",
+                        "│ {:<width$}:{} {}│",
                         String::from(parts[0]),
                         String::from(parts[1]),
                         right_padding_spaces,
@@ -850,7 +850,7 @@ impl Game {
             Color::White,
             start_x,
             bottom_border_y,
-            format!("{}{}{}", "|", ("-").repeat(frame_width), "|").as_str(),
+            format!("╰{}╯", ("─").repeat(frame_width)).as_str(),
         )?;
 
         stdout.flush()?;
@@ -906,232 +906,205 @@ impl Game {
         loop {
             if self.paused {
                 self.handle_pause_event(stdout)?;
-            } else {
-                if self.level <= MAX_LEVEL && self.lines >= LINES_PER_LEVEL * (self.level + 1) {
-                    self.level += 1;
-                    self.drop_interval -= self.drop_interval / 10;
+                continue;
+            }
+            if self.level <= MAX_LEVEL && self.lines >= LINES_PER_LEVEL * (self.level + 1) {
+                self.level += 1;
+                self.drop_interval -= self.drop_interval / 10;
+            }
+
+            if drop_timer.elapsed() >= Duration::from_millis(self.drop_interval) {
+                let mut tetromino = self.current_tetromino.clone();
+                let can_move_down = self.can_move(
+                    &tetromino,
+                    tetromino.position.row as i16 + 1,
+                    tetromino.position.col as i16,
+                );
+
+                if can_move_down {
+                    tetromino.move_down(self, stdout)?;
+                    self.current_tetromino = tetromino;
+                } else {
+                    self.lock_and_move_to_next(&tetromino, stdout)?;
                 }
 
-                if drop_timer.elapsed() >= Duration::from_millis(self.drop_interval) {
-                    let mut tetromino = self.current_tetromino.clone();
-                    let can_move_down = self.can_move(
-                        &tetromino,
-                        tetromino.position.row as i16 + 1,
-                        tetromino.position.col as i16,
-                    );
+                self.render_current_tetromino()?;
 
-                    if can_move_down {
-                        tetromino.move_down(self, stdout)?;
-                        self.current_tetromino = tetromino;
-                    } else {
-                        self.lock_and_move_to_next(&tetromino, stdout)?;
-                    }
+                drop_timer = Instant::now();
+            }
 
-                    self.render_current_tetromino()?;
-
-                    drop_timer = Instant::now();
-                }
-
-                if self.terminal.poll_event(Duration::from_millis(10))? {
-                    if let Ok(event) = self.terminal.read_event() {
-                        match event {
-                            Event::Key(KeyEvent {
-                                code,
-                                state: _,
-                                kind,
-                                modifiers: _,
-                            }) => {
-                                if kind == KeyEventKind::Press {
-                                    let mut tetromino = self.current_tetromino.clone();
-                                    // directions
-                                    // left
-                                    if code.matches(&global_config.left) {
-                                        tetromino.move_left(self, stdout)?;
-                                        self.current_tetromino = tetromino;
-                                    // right
-                                    } else if code.matches(&global_config.right) {
-                                        tetromino.move_right(self, stdout)?;
-                                        self.current_tetromino = tetromino;
-                                    } else if code.matches(&global_config.rotate) {
-                                        tetromino.rotate(self, stdout)?;
-                                        self.current_tetromino = tetromino;
-                                    } else if code.matches(&global_config.soft_drop) {
-                                        if soft_drop_timer.elapsed()
-                                            >= (Duration::from_millis(self.drop_interval / 8))
-                                        {
-                                            let mut tetromino = self.current_tetromino.clone();
-                                            if self.can_move(
-                                                &tetromino,
-                                                tetromino.position.row as i16 + 1,
-                                                tetromino.position.col as i16,
-                                            ) {
-                                                tetromino.move_down(self, stdout)?;
-                                                self.current_tetromino = tetromino;
-                                            } else {
-                                                self.lock_and_move_to_next(&tetromino, stdout)?;
-                                            }
-
-                                            soft_drop_timer = Instant::now();
+            if self.terminal.poll_event(Duration::from_millis(10))? {
+                if let Ok(event) = self.terminal.read_event() {
+                    match event {
+                        Event::Key(KeyEvent {
+                            code,
+                            state: _,
+                            kind,
+                            modifiers: _,
+                        }) => {
+                            if kind == KeyEventKind::Press {
+                                let mut tetromino = self.current_tetromino.clone();
+                                // directions
+                                // left
+                                if code.matches(&global_config.left) {
+                                    tetromino.move_left(self, stdout)?;
+                                    self.current_tetromino = tetromino;
+                                // right
+                                } else if code.matches(&global_config.right) {
+                                    tetromino.move_right(self, stdout)?;
+                                    self.current_tetromino = tetromino;
+                                } else if code.matches(&global_config.rotate) {
+                                    tetromino.rotate(self, stdout)?;
+                                    self.current_tetromino = tetromino;
+                                } else if code.matches(&global_config.soft_drop) {
+                                    if soft_drop_timer.elapsed()
+                                        >= (Duration::from_millis(self.drop_interval / 8))
+                                    {
+                                        let mut tetromino = self.current_tetromino.clone();
+                                        if self.can_move(
+                                            &tetromino,
+                                            tetromino.position.row as i16 + 1,
+                                            tetromino.position.col as i16,
+                                        ) {
+                                            tetromino.move_down(self, stdout)?;
+                                            self.current_tetromino = tetromino;
+                                        } else {
+                                            self.lock_and_move_to_next(&tetromino, stdout)?;
                                         }
-                                    } else if code.matches(&global_config.hard_drop) {
-                                        tetromino.hard_drop(self, stdout)?;
-                                        self.lock_and_move_to_next(&tetromino, stdout)?;
-                                    } else if code == global_config.pause {
-                                        self.paused = !self.paused;
-                                    } else if code == global_config.quit {
-                                        self.handle_quit_event(stdout)?;
+
+                                        soft_drop_timer = Instant::now();
                                     }
-                                    // match code {
-                                    //     KeyCode::Char('h') | KeyCode::Left => {
-                                    //         tetromino.move_left(self, stdout)?;
-                                    //         self.current_tetromino = tetromino;
-                                    //     }
-                                    //     KeyCode::Char('l') | KeyCode::Right => {
-                                    //         tetromino.move_right(self, stdout)?;
-                                    //         self.current_tetromino = tetromino;
-                                    //     }
-                                    //     KeyCode::Char(' ') => {
-                                    //         tetromino.rotate(self, stdout)?;
-                                    //         self.current_tetromino = tetromino;
-                                    //     }
-                                    //     KeyCode::Char('s') | KeyCode::Up => {
-                                    //         if soft_drop_timer.elapsed()
-                                    //             >= (Duration::from_millis(self.drop_interval / 8))
-                                    //         {
-                                    //             let mut tetromino = self.current_tetromino.clone();
-                                    //             if self.can_move(
-                                    //                 &tetromino,
-                                    //                 tetromino.position.row as i16 + 1,
-                                    //                 tetromino.position.col as i16,
-                                    //             ) {
-                                    //                 tetromino.move_down(self, stdout)?;
-                                    //                 self.current_tetromino = tetromino;
-                                    //             } else {
-                                    //                 self.lock_and_move_to_next(&tetromino, stdout)?;
-                                    //             }
-
-                                    //             soft_drop_timer = Instant::now();
-                                    //         }
-                                    //     }
-                                    //     KeyCode::Char('j') | KeyCode::Down => {
-                                    //         tetromino.hard_drop(self, stdout)?;
-                                    //         self.lock_and_move_to_next(&tetromino, stdout)?;
-                                    //     }
-                                    //     KeyCode::Char('p') => {
-                                    //         self.paused = !self.paused;
-                                    //     }
-                                    //     KeyCode::Char('q') => {
-                                    //         self.handle_quit_event(stdout)?;
-                                    //     }
-                                    //     _ => {}
-                                    // }
+                                } else if code.matches(&global_config.hard_drop) {
+                                    tetromino.hard_drop(self, stdout)?;
+                                    self.lock_and_move_to_next(&tetromino, stdout)?;
+                                } else if code == global_config.pause {
+                                    self.paused = !self.paused;
+                                } else if code == global_config.quit {
+                                    self.handle_quit_event(stdout)?;
                                 }
                             }
-                            _ => {}
                         }
-                        self.render_current_tetromino()?;
+                        _ => {}
                     }
+                    self.render_current_tetromino()?;
                 }
+            }
 
-                if let Some(receiver) = &self.receiver {
-                    for message in receiver.try_iter() {
-                        match message {
-                            MessageType::ClearedRows(rows) => {
-                                let cells =
-                                    vec![I_CELL, O_CELL, T_CELL, S_CELL, Z_CELL, T_CELL, L_CELL];
-                                let mut rng = rand::thread_rng();
-                                let random_cell_index = rng.gen_range(0..cells.len());
-                                let random_cell = cells[random_cell_index].clone();
+            if let Some(receiver) = &self.receiver {
+                for message in receiver.try_iter() {
+                    match message {
+                        MessageType::ClearedRows(rows) => {
+                            let cells =
+                                vec![I_CELL, O_CELL, T_CELL, S_CELL, Z_CELL, T_CELL, L_CELL];
+                            let mut rng = rand::thread_rng();
+                            let random_cell_index = rng.gen_range(0..cells.len());
+                            let random_cell = cells[random_cell_index].clone();
 
-                                let mut new_row = vec![random_cell; PLAY_WIDTH];
-                                let random_column = rng.gen_range(0..PLAY_WIDTH);
-                                new_row[random_column] = EMPTY_CELL;
+                            let mut new_row = vec![random_cell; PLAY_WIDTH];
+                            let random_column = rng.gen_range(0..PLAY_WIDTH);
+                            new_row[random_column] = EMPTY_CELL;
 
-                                for _ in 0..rows {
-                                    self.play_grid.remove(0);
-                                    self.play_grid.insert(PLAY_HEIGHT - 1, new_row.clone());
-                                }
-
-                                self.render_play_grid()?;
+                            for _ in 0..rows {
+                                self.play_grid.remove(0);
+                                self.play_grid.insert(PLAY_HEIGHT - 1, new_row.clone());
                             }
-                            MessageType::Notification(msg) => {
-                                self.paused = !self.paused;
 
-                                self.print_centered_messages(
+                            self.render_play_grid()?;
+                        }
+                        MessageType::Notification(msg) => {
+                            self.paused = !self.paused;
+                            // memoize notification message
+                            static NOTIFICATION_MESSAGE: OnceLock<String> = OnceLock::new();
+                            let message = NOTIFICATION_MESSAGE.get_or_init(|| {
+                                format!(
+                                    "{}: Restart OR {}: Continue OR {}: Quit",
+                                    global_config.restart.to_char(),
+                                    global_config.continue_key.to_char(),
+                                    global_config.quit.to_char()
+                                )
+                            });
+
+                            self.print_centered_messages(stdout, None, vec![&msg, "", message])?;
+
+                            self.multiplayer_score.my_score += 1;
+
+                            let stats_start_x = self.start_x - STATS_WIDTH - DISTANCE - 1;
+                            if let Some(_) = &self.stream {
+                                execute!(
                                     stdout,
-                                    None,
-                                    vec![&msg, "", "(R)estart | (C)ontinue | (Q)uit"],
+                                    SetForegroundColor(Color::White),
+                                    SetBackgroundColor(Color::Black),
+                                    SavePosition,
+                                    MoveTo(
+                                        stats_start_x as u16 + 2 + "Score: ".len() as u16,
+                                        self.start_y as u16 + 10
+                                    ),
+                                    Print(format!(
+                                        "{} - {}",
+                                        self.multiplayer_score.my_score,
+                                        self.multiplayer_score.competitor_score
+                                    )),
+                                    ResetColor,
+                                    RestorePosition,
                                 )?;
+                            }
 
-                                self.multiplayer_score.my_score += 1;
-
-                                let stats_start_x = self.start_x - STATS_WIDTH - DISTANCE - 1;
-                                if let Some(_) = &self.stream {
-                                    execute!(
-                                        stdout,
-                                        SetForegroundColor(Color::White),
-                                        SetBackgroundColor(Color::Black),
-                                        SavePosition,
-                                        MoveTo(
-                                            stats_start_x as u16 + 2 + "Score: ".len() as u16,
-                                            self.start_y as u16 + 10
-                                        ),
-                                        Print(format!(
-                                            "{} - {}",
-                                            self.multiplayer_score.my_score,
-                                            self.multiplayer_score.competitor_score
-                                        )),
-                                        ResetColor,
-                                        RestorePosition,
-                                    )?;
-                                }
-
-                                loop {
-                                    if poll(Duration::from_millis(10))? {
-                                        let event = read()?;
-                                        match event {
-                                            Event::Key(KeyEvent {
-                                                code,
-                                                modifiers: _,
-                                                kind,
-                                                state: _,
-                                            }) => {
-                                                if kind == KeyEventKind::Press {
-                                                    match code {
-                                                        KeyCode::Enter | KeyCode::Char('c') => {
-                                                            self.render_changed_portions()?;
-                                                            self.paused = false;
-                                                            break;
-                                                        }
-                                                        KeyCode::Char('r') => {
-                                                            reset_needed = true;
-                                                            break;
-                                                        }
-                                                        KeyCode::Char('q') => {
-                                                            self.quit()?;
-                                                        }
-                                                        _ => {}
+                            loop {
+                                if poll(Duration::from_millis(10))? {
+                                    let event = read()?;
+                                    match event {
+                                        Event::Key(KeyEvent {
+                                            code,
+                                            modifiers: _,
+                                            kind,
+                                            state: _,
+                                        }) => {
+                                            if kind == KeyEventKind::Press {
+                                                match code {
+                                                    KeyCode::Enter | KeyCode::Char('c') => {
+                                                        self.render_changed_portions()?;
+                                                        self.paused = false;
+                                                        break;
                                                     }
+                                                    KeyCode::Char('r') => {
+                                                        reset_needed = true;
+                                                        break;
+                                                    }
+                                                    KeyCode::Char('q') => {
+                                                        self.quit()?;
+                                                    }
+                                                    _ => {}
                                                 }
                                             }
-                                            _ => {}
                                         }
+                                        _ => {}
                                     }
                                 }
                             }
                         }
                     }
                 }
+            }
 
-                if reset_needed {
-                    reset_game(self, stdout)?;
-                }
+            if reset_needed {
+                reset_game(self, stdout)?;
             }
         }
     }
 
     fn handle_pause_event(&mut self, stdout: &mut io::Stdout) -> Result<()> {
-        self.print_centered_messages(stdout, None, vec!["PAUSED", "", "(C)ontinue | (Q)uit"])?;
+        let global_config = CONFIG.get().unwrap();
+        // memoized formatted pause event message
+        static PAUSE_EVENT_MESSAGE: OnceLock<String> = OnceLock::new();
+        let message = PAUSE_EVENT_MESSAGE.get_or_init(|| {
+            format!(
+                "{} Continue OR {} Quit",
+                global_config.continue_key.to_char(),
+                global_config.quit.to_char()
+            )
+        });
+
+        self.print_centered_messages(stdout, None, vec!["PAUSED", "", message])?;
 
         loop {
             if self.terminal.poll_event(Duration::from_millis(10))? {
@@ -1144,16 +1117,13 @@ impl Game {
                         state: _,
                     }) => {
                         if kind == KeyEventKind::Press {
-                            match code {
-                                KeyCode::Enter | KeyCode::Char('c') => {
-                                    self.render_changed_portions()?;
-                                    self.paused = false;
-                                    break;
-                                }
-                                KeyCode::Char('q') => {
-                                    self.quit()?;
-                                }
-                                _ => {}
+                            if code.matches(&KeyWithAlt::new(global_config.pause, KeyCode::Enter)) {
+                                self.render_changed_portions()?;
+                                self.paused = false;
+                                break;
+                            }
+                            if code == global_config.quit {
+                                self.quit()?;
                             }
                         }
                     }
@@ -1166,7 +1136,16 @@ impl Game {
     }
 
     fn handle_quit_event(&mut self, stdout: &mut io::Stdout) -> Result<()> {
-        self.print_centered_messages(stdout, None, vec!["QUIT?", "", "(Y)es | (N)o"])?;
+        let global_config = CONFIG.get().unwrap();
+        static QUIT_EVENT_MSG: OnceLock<String> = OnceLock::new();
+        let message = QUIT_EVENT_MSG.get_or_init(|| {
+            format!(
+                "{}: Quit OR {}: Cancel",
+                global_config.continue_key.to_char(),
+                global_config.quit.to_char()
+            )
+        });
+        self.print_centered_messages(stdout, None, vec!["QUIT?", "", message])?;
 
         loop {
             if self.terminal.poll_event(Duration::from_millis(10))? {
@@ -1202,7 +1181,7 @@ impl Game {
 
     pub fn can_move(&mut self, tetromino: &Tetromino, new_row: i16, new_col: i16) -> bool {
         for (t_row, row) in tetromino.get_cells().iter().enumerate() {
-            for (t_col, &ref cell) in row.iter().enumerate() {
+            for (t_col, cell) in row.iter().enumerate() {
                 if cell.symbols == SQUARE_BRACKETS {
                     let grid_x = new_col + t_col as i16;
                     let grid_y = new_row + t_row as i16;
@@ -1480,15 +1459,14 @@ impl Game {
             let count: i64 = self.highscore_repo.count()?;
 
             if count < 5 {
-                self.new_high_score(stdout)?;
-            } else {
-                let player: Player = self.highscore_repo.get_player_at_rank(5)?;
+                return self.new_high_score(stdout);
+            }
+            let player: Player = self.highscore_repo.get_player_at_rank(5)?;
 
-                if (self.score as u64) <= player.score {
-                    self.show_high_scores(stdout)?;
-                } else {
-                    self.new_high_score(stdout)?;
-                }
+            if (self.score as u64) <= player.score {
+                self.show_high_scores(stdout)?;
+            } else {
+                self.new_high_score(stdout)?;
             }
         }
 
@@ -1496,6 +1474,14 @@ impl Game {
     }
 
     fn show_high_scores(&mut self, stdout: &mut io::Stdout) -> Result<()> {
+        let global_config = CONFIG.get().unwrap();
+        // create highscore button prompt
+        let message = format!(
+            "{}: Restart OR {}: Quit",
+            global_config.continue_key.to_char(),
+            global_config.quit.to_char()
+        );
+
         let mut players_str: Vec<String> = Vec::new();
         {
             let players = self.highscore_repo.get_top_players()?;
@@ -1518,7 +1504,7 @@ impl Game {
                 vec!["GAME OVER"]
                     .into_iter()
                     .chain(vec![""; players_str.len() + 3])
-                    .chain(vec!["(R)estart | (Q)uit"].into_iter())
+                    .chain(vec![message.as_str()].into_iter())
                     .collect::<Vec<&str>>(),
             )?;
 
@@ -1530,36 +1516,24 @@ impl Game {
                 players_str.iter().map(|s| s.as_str()).collect(),
             )?;
         } else {
-            self.print_centered_messages(
-                stdout,
-                None,
-                vec!["GAME OVER", "", "(R)estart | (Q)uit"],
-            )?;
+            self.print_centered_messages(stdout, None, vec!["GAME OVER", "", &message])?;
         }
 
         loop {
             if self.terminal.poll_event(Duration::from_millis(10))? {
                 let event = self.terminal.read_event()?;
-                match event {
-                    Event::Key(KeyEvent {
-                        code,
-                        modifiers: _,
-                        kind,
-                        state: _,
-                    }) => {
-                        if kind == KeyEventKind::Press {
-                            match code {
-                                KeyCode::Char('q') => {
-                                    self.quit()?;
-                                }
-                                KeyCode::Char('r') => {
-                                    reset_game(self, stdout)?;
-                                }
-                                _ => {}
-                            }
-                        }
+                if let Event::Key(KeyEvent {
+                    code,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) = event
+                {
+                    if code == global_config.quit {
+                        return self.quit();
                     }
-                    _ => {}
+                    if code == global_config.continue_key {
+                        reset_game(self, stdout)?;
+                    }
                 }
             }
         }
@@ -1586,75 +1560,70 @@ impl Game {
                 + ENTER_YOUR_NAME_MESSAGE.len() as u16,
             term_height / 2 - 3 / 2 + 2,
         ))?;
-        stdout.write(format!("{}", name).as_bytes())?;
+        stdout.write_all(name.to_string().as_bytes())?;
         stdout.execute(cursor::Show)?;
         stdout.flush()?;
 
         loop {
             if self.terminal.poll_event(Duration::from_millis(10))? {
                 let event = self.terminal.read_event()?;
-                match event {
-                    Event::Key(KeyEvent {
-                        code,
-                        state: _,
-                        kind,
-                        modifiers: _,
-                    }) => {
-                        if kind == KeyEventKind::Press {
-                            match code {
-                                KeyCode::Backspace => {
-                                    // Handle Backspace key to remove characters.
-                                    if !name.is_empty() && cursor_position > 0 {
-                                        name.remove(cursor_position - 1);
-                                        cursor_position -= 1;
+                if let Event::Key(KeyEvent {
+                    code,
+                    kind: KeyEventKind::Press,
+                    ..
+                }) = event
+                {
+                    match code {
+                        KeyCode::Backspace => {
+                            // Handle Backspace key to remove characters.
+                            if !name.is_empty() && cursor_position > 0 {
+                                name.remove(cursor_position - 1);
+                                cursor_position -= 1;
 
-                                        stdout.execute(MoveLeft(1))?;
-                                        stdout.write(b" ")?;
-                                        stdout.flush()?;
-                                        print!("{}", &name[cursor_position..]);
-                                        stdout.execute(MoveLeft(
-                                            name.len() as u16 - cursor_position as u16 + 1,
-                                        ))?;
-                                        stdout.flush()?;
-                                    }
-                                }
-                                KeyCode::Enter => {
-                                    self.highscore_repo.insert(&name, self.score)?;
-
-                                    execute!(stdout.lock(), cursor::Hide)?;
-                                    self.show_high_scores(stdout)?;
-                                }
-                                KeyCode::Left => {
-                                    // Move the cursor left.
-                                    if cursor_position > 0 {
-                                        stdout.execute(MoveLeft(1))?;
-                                        cursor_position -= 1;
-                                    }
-                                }
-                                KeyCode::Right => {
-                                    // Move the cursor right.
-                                    if cursor_position < name.len() {
-                                        stdout.execute(MoveRight(1))?;
-                                        cursor_position += 1;
-                                    }
-                                }
-                                KeyCode::Char(c) => {
-                                    if name.len() < MAX_NAME_LENGTH {
-                                        name.insert(cursor_position, c);
-                                        cursor_position += 1;
-                                        print!("{}", &name[cursor_position - 1..]);
-                                        stdout.flush()?;
-                                        for _ in cursor_position..name.len() {
-                                            stdout.execute(MoveLeft(1))?;
-                                        }
-                                        stdout.flush()?;
-                                    }
-                                }
-                                _ => {}
+                                stdout.execute(MoveLeft(1))?;
+                                stdout.write_all(b" ")?;
+                                stdout.flush()?;
+                                print!("{}", &name[cursor_position..]);
+                                stdout.execute(MoveLeft(
+                                    name.len() as u16 - cursor_position as u16 + 1,
+                                ))?;
+                                stdout.flush()?;
                             }
                         }
+                        KeyCode::Enter => {
+                            self.highscore_repo.insert(&name, self.score)?;
+
+                            execute!(stdout.lock(), cursor::Hide)?;
+                            self.show_high_scores(stdout)?;
+                        }
+                        KeyCode::Left => {
+                            // Move the cursor left.
+                            if cursor_position > 0 {
+                                stdout.execute(MoveLeft(1))?;
+                                cursor_position -= 1;
+                            }
+                        }
+                        KeyCode::Right => {
+                            // Move the cursor right.
+                            if cursor_position < name.len() {
+                                stdout.execute(MoveRight(1))?;
+                                cursor_position += 1;
+                            }
+                        }
+                        KeyCode::Char(c) => {
+                            if name.len() < MAX_NAME_LENGTH {
+                                name.insert(cursor_position, c);
+                                cursor_position += 1;
+                                print!("{}", &name[cursor_position - 1..]);
+                                stdout.flush()?;
+                                for _ in cursor_position..name.len() {
+                                    stdout.execute(MoveLeft(1))?;
+                                }
+                                stdout.flush()?;
+                            }
+                        }
+                        _ => {}
                     }
-                    _ => {}
                 }
             }
         }
@@ -1671,13 +1640,11 @@ impl Game {
 
         let longest_length = find_longest_message_length(&messages);
 
-        let frame_width: usize;
-        if let Some(value) = width {
-            frame_width = value;
+        let frame_width: usize = if let Some(value) = width {
+            value
         } else {
-            frame_width = longest_length + MARGIN * 2;
-        }
-
+            longest_length + MARGIN
+        };
         let start_x = (term_width - frame_width as u16 - 2) / 2;
 
         // Print the top border
@@ -1685,21 +1652,22 @@ impl Game {
             Color::White,
             start_x,
             start_y - 1,
-            format!("{}{}{}", "|", ("-").repeat(frame_width), "|").as_str(),
+            format!("{}{}{}", "╭", ("─").repeat(frame_width), "╮").as_str(),
         )?;
 
         // Print the messages with borders
         for (index, message) in messages.iter().enumerate() {
-            let left = (frame_width - message.len()) / 2;
+            let char_count_message = message.chars().count();
+            let padding = (frame_width - char_count_message) / 2;
             self.terminal.write(
                 Color::White,
                 start_x,
                 start_y + index as u16,
                 format!(
-                    "|{}{}{}|",
-                    " ".repeat(left as usize),
+                    "│{}{}{}│",
+                    " ".repeat(padding),
                     message,
-                    " ".repeat(frame_width - left - message.len())
+                    " ".repeat(frame_width - padding - char_count_message)
                 )
                 .as_str(),
             )?;
@@ -1711,7 +1679,7 @@ impl Game {
             Color::White,
             start_x,
             bottom_border_y,
-            format!("{}{}{}", "|", ("-").repeat(frame_width), "|").as_str(),
+            format!("╰{}╯", ("─").repeat(frame_width)).as_str(),
         )?;
 
         stdout.flush()?;
@@ -1818,7 +1786,7 @@ impl Tetromino {
     }
 }
 
-pub fn tetromino_width(tetromino: &Vec<Vec<Cell>>) -> usize {
+pub fn tetromino_width(tetromino: &[Vec<Cell>]) -> usize {
     let mut width = 0;
 
     for col in 0..tetromino[0].len() {
@@ -1840,21 +1808,21 @@ const MARGIN: usize = CELL_WIDTH;
 fn find_longest_message_length(messages: &[&str]) -> usize {
     messages
         .iter()
-        .map(|message| message.len())
+        .map(|message| message.chars().count())
         .max()
         .unwrap_or(0)
 }
 
-fn find_longest_key_value_length(messages: &Vec<&str>) -> (usize, usize) {
+fn find_longest_key_value_length<'a, T: AsRef<str> + 'a>(messages: &[T]) -> (usize, usize) {
     let mut longest_key_length = 0;
     let mut longest_value_length = 0;
 
-    for message in messages {
-        if message.len() == 0 {
+    for message in messages.iter() {
+        if message.as_ref().is_empty() {
             continue;
         }
-        let parts: Vec<&str> = message.split(':').collect();
-        longest_key_length = longest_key_length.max(parts[0].len());
+        let parts: Vec<&str> = message.as_ref().split(':').collect();
+        longest_key_length = longest_key_length.max(parts[0].chars().count());
         longest_value_length = longest_value_length.max(parts[1].chars().count());
     }
 

@@ -34,5 +34,9 @@
 	"quit": "Esc",
 	"continue": {
 		"char_key": "c"
+	},
+	"restart": {
+		"char_key": "r"
 	}
+
 }

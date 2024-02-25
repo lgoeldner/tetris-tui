@@ -1,0 +1,5 @@
+Remove the package the way you installed it and then Remove the files here:
+
+- Linux: /home/<YOUR_USERNAME>/.config/tetristui AND /home/<YOUR_USERNAME>/.local/share/barapp
+- Windows: C:\Users\<YOUR_USERNAME>\AppData\Roaming\Tetris Tui\
+- MacOs: /Users/<YOUR_USERNAME>/Library/Application Support/Tetris-Tui/
