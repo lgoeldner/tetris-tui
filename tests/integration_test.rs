@@ -78,7 +78,7 @@ impl Terminal for MockTerminal {
 struct ITetromino;
 
 impl TetrominoSpawner for ITetromino {
-    fn spawn(&self, is_next: bool) -> Tetromino {
+    fn spawn(&mut self, is_next: bool) -> Tetromino {
         let i_tetromino_states: Vec<Vec<Vec<Cell>>> = vec![
             vec![
                 vec![EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, EMPTY_CELL],

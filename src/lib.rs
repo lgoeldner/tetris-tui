@@ -4,11 +4,11 @@ use rand::Rng;
 use std::error::Error;
 use std::io::{self, Write};
 use std::net::{TcpListener, TcpStream};
-use std::result;
 use std::sync::mpsc::{channel, Receiver, Sender};
 use std::sync::{Once, OnceLock};
 use std::thread;
 use std::time::{Duration, Instant};
+use std::{result, vec};
 
 use crossterm::{
     cursor::{self, MoveLeft, MoveRight, MoveTo, RestorePosition, SavePosition},
@@ -161,7 +161,7 @@ pub fn start(args: &Args, term_width: u16, term_height: u16) -> Result<()> {
     let start_y = (term_height as usize - PLAY_HEIGHT - 2) / 2;
 
     let terminal = Box::new(RealTerminal);
-    let tetromino_spawner = Box::new(RandomTetromino);
+    let tetromino_spawner = Box::new(RandomTetromino::new());
 
     let conn = sqlite::open()?;
     let sqlite_highscore_repo = Box::new(HighScoreRepo { conn });
@@ -333,21 +333,23 @@ impl Terminal for RealTerminal {
 }
 
 pub trait TetrominoSpawner {
-    fn spawn(&self, is_next: bool) -> Tetromino;
+    fn spawn(&mut self, is_next: bool) -> Tetromino;
 }
 
-pub struct RandomTetromino;
+pub struct RandomTetromino {
+	bag: TgmBag
+}
 
 impl RandomTetromino {
     pub fn new() -> Self {
-        Self
+        Self {
+			bag: TgmBag::new()
+		}
     }
 }
 
 impl TetrominoSpawner for RandomTetromino {
-    fn spawn(&self, is_next: bool) -> Tetromino {
-        
-
+    fn spawn(&mut self, is_next: bool) -> Tetromino {
         let i_tetromino_states: Vec<Vec<Vec<Cell>>> = vec![
             vec![
                 vec![EMPTY_CELL, EMPTY_CELL, EMPTY_CELL, EMPTY_CELL],
@@ -504,9 +506,8 @@ impl TetrominoSpawner for RandomTetromino {
         ];
 
         let mut rng = rand::thread_rng();
-        let random_tetromino_index = rng.gen_range(0..tetromino_states.len());
-
-        let iter = (0..tetromino_states.len());
+        // let random_tetromino_index = rng.gen_range(0..tetromino_states.len());
+		let random_tetromino_index = self.bag.draw() as usize;
 
         let states = tetromino_states[random_tetromino_index].clone();
         let tetromino_with = tetromino_width(&states[0]);
@@ -523,6 +524,52 @@ impl TetrominoSpawner for RandomTetromino {
             current_state: 0,
             position: Position { row, col },
         }
+    }
+}
+
+/// implements [Tetris Random Algorithm](https://tetris.fandom.com/wiki/Tetris_The_Grand_Master_3_Terror-Instinct),
+///
+/// holds a bag with numbers correspoding to each tetronimo
+/// drawing one at random and adding the most drought piece again
+struct TgmBag {
+    /// index corresponds to the frequencies
+    frequencies: Vec<u8>,
+    bag: Vec<u8>,
+}
+
+use rand::seq::IteratorRandom;
+impl TgmBag {
+    fn new() -> Self {
+        Self {
+            frequencies: [5].into_iter().cycle().take(7).collect(),
+            bag: (0..7).flat_map(|x| std::iter::repeat(x).take(5)).collect(),
+        }
+    }
+
+    fn draw(&mut self) -> u8 {
+        fn least_used(this: &TgmBag) -> u8 {
+            // enumerate the frequencies,
+            // get the minimum and convert it to a u8
+            this.frequencies
+                .iter()
+                .enumerate()
+                .min_by_key(|s| s.1)
+                .unwrap()
+                .0 as u8
+        }
+
+        // get the thread local random seed
+        let mut rng = rand::thread_rng();
+
+        let chosen_index = (0..self.bag.len()).choose(&mut rng).unwrap();
+        let chosen_tetronimo = self.bag.swap_remove(chosen_index);
+        // insert the least represented tetromino into the bag
+        let least_used = least_used(&self);
+        self.bag.push(least_used);
+        // update frequencies
+        self.frequencies[least_used as usize] += 1;
+        self.frequencies[chosen_tetronimo as usize] -= 1;
+        chosen_tetronimo
     }
 }
 
@@ -552,7 +599,7 @@ pub struct Game {
 impl Game {
     pub fn new(
         terminal: Box<dyn Terminal + Send>,
-        tetromino_spawner: Box<dyn TetrominoSpawner + Send>,
+        mut tetromino_spawner: Box<dyn TetrominoSpawner + Send>,
         sqlite_highscore_repo: Box<dyn HighScore + Send>,
         start_x: usize,
         start_y: usize,
