@@ -5,7 +5,7 @@ use crate::CELL_WIDTH;
 use serde::Deserialize;
 use std::{fs, io, path::PathBuf};
 
-static DEFAULT_CONFIG: &str = include_str!(r"..\default_config.json");
+static DEFAULT_CONFIG: &str = include_str!(r"../default_config.json");
 
 impl Config {
     pub fn get() -> Config {
@@ -26,8 +26,7 @@ impl Config {
             let json_string = fs::read_to_string(&conf_location).or_else(|e| {
                 // if the file is not found, try to create it from the `DEFAULT_CONFIG`
                 if let io::ErrorKind::NotFound = e.kind() {
-                    eprintln!("Could not find your config file, trying to create...");
-                    dbg!(e.kind());
+                    eprintln!("Could not find your config file, trying to create at {}", conf_location);
                     // create all directories
                     fs::create_dir_all(project_dir.config_dir())?;
                     // write the default file
