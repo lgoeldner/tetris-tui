@@ -1,4 +1,6 @@
 # tetris-tui
+### Forked from [tetris-tui](https://github.com/quantonganh/tetris-tui)
+
 Tetris in the terminal
 
 ![Play tetris in 2-player mode](./tetris-2-player.gif)
