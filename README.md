@@ -1,6 +1,12 @@
 # tetris-tui
 ### Forked from [tetris-tui](https://github.com/quantonganh/tetris-tui)
 
+## Changes
+- Implemented [Tetris Random Algorithm](https://tetris.fandom.com/wiki/Tetris_The_Grand_Master_3_Terror-Instinct)
+- Optimized memory and performance by using slices instead of multidimensional `Vec<_>`s
+- Added configuration possiblities for custom keybindings
+
+
 Tetris in the terminal
 
 ![Play tetris in 2-player mode](./tetris-2-player.gif)
